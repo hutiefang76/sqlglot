@@ -334,3 +334,85 @@ LEFT ANTI JOIN (
     1 AS b
 ) AS sub
   ON x.b = sub.b;
+
+# title: Noop - cross join on derived table without FROM clause filtered by FALSE
+SELECT
+  x.a
+FROM x
+CROSS JOIN (
+  SELECT
+    1 AS b
+  WHERE
+    FALSE
+) AS y;
+SELECT
+  x.a
+FROM x
+CROSS JOIN (
+  SELECT
+    1 AS b
+  WHERE
+    FALSE
+) AS y;
+
+# title: Noop - cross join on aggregate derived table filtered by HAVING FALSE
+SELECT
+  x.a
+FROM x
+CROSS JOIN (
+  SELECT
+    SUM(y.b) AS b
+  FROM y
+  HAVING
+    FALSE
+) AS y;
+SELECT
+  x.a
+FROM x
+CROSS JOIN (
+  SELECT
+    SUM(y.b) AS b
+  FROM y
+  HAVING
+    FALSE
+) AS y;
+
+# title: Noop - cross join on grouped aggregate derived table
+SELECT
+  x.a
+FROM x
+CROSS JOIN (
+  SELECT
+    COUNT(*) AS b
+  FROM y
+  GROUP BY
+    y.b
+) AS y;
+SELECT
+  x.a
+FROM x
+CROSS JOIN (
+  SELECT
+    COUNT(*) AS b
+  FROM y
+  GROUP BY
+    y.b
+) AS y;
+
+# title: Noop - cross join on derived table without FROM clause with LIMIT 0
+SELECT
+  x.a
+FROM x
+CROSS JOIN (
+  SELECT
+    1 AS b
+  LIMIT 0
+) AS y;
+SELECT
+  x.a
+FROM x
+CROSS JOIN (
+  SELECT
+    1 AS b
+  LIMIT 0
+) AS y;

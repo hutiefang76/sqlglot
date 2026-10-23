@@ -2011,6 +2011,108 @@ SELECT :with_,WITH :expressions,CTE :this,UNION :this,SELECT :expressions,1,:exp
             pretty=True,
         )
 
+    def test_eliminate_joins_single_row_clauses(self):
+        schema = {"x": {"a": "INT"}, "y": {"a": "INT"}}
+
+        cases = [
+            (
+                "fromless where false",
+                "SELECT x.a FROM x CROSS JOIN (SELECT 1 AS b WHERE FALSE) AS z",
+                [],
+            ),
+            (
+                "scalar aggregate having false",
+                "SELECT x.a FROM x CROSS JOIN (SELECT COUNT(*) AS b FROM y HAVING FALSE) AS z",
+                [],
+            ),
+            (
+                "fromless limit 0",
+                "SELECT x.a FROM x CROSS JOIN (SELECT 1 AS b LIMIT 0) AS z",
+                [],
+            ),
+            (
+                "fromless offset 1",
+                "SELECT x.a FROM x CROSS JOIN (SELECT 1 AS b OFFSET 1) AS z",
+                [],
+            ),
+            (
+                "grouped aggregate",
+                "SELECT x.a FROM x CROSS JOIN (SELECT COUNT(*) AS b FROM y GROUP BY y.a) AS z",
+                [(1,), (1,)],
+            ),
+            (
+                "grouped aggregate where false",
+                "SELECT x.a FROM x CROSS JOIN (SELECT COUNT(*) AS b FROM y WHERE FALSE GROUP BY y.a) AS z",
+                [],
+            ),
+            (
+                "fromless qualify",
+                "SELECT x.a FROM x CROSS JOIN (SELECT 1 AS b QUALIFY ROW_NUMBER() OVER () > 1) AS z",
+                [],
+            ),
+            (
+                "scalar aggregate qualify",
+                "SELECT x.a FROM x CROSS JOIN (SELECT COUNT(*) AS b FROM y QUALIFY ROW_NUMBER() OVER () > 1) AS z",
+                [],
+            ),
+            (
+                "scalar aggregate where false",
+                "SELECT x.a FROM x CROSS JOIN (SELECT COUNT(*) AS b FROM y WHERE FALSE) AS z",
+                [(1,)],
+            ),
+            (
+                "fromless literal",
+                "SELECT x.a FROM x CROSS JOIN (SELECT 1 AS b) AS z",
+                [(1,)],
+            ),
+            (
+                "fromless limit 2",
+                "SELECT x.a FROM x CROSS JOIN (SELECT 1 AS b LIMIT 2) AS z",
+                [(1,)],
+            ),
+            (
+                "scalar aggregate limit 0",
+                "SELECT x.a FROM x CROSS JOIN (SELECT COUNT(*) AS b FROM y LIMIT 0) AS z",
+                [],
+            ),
+            (
+                "fromless fractional limit",
+                "SELECT x.a FROM x CROSS JOIN (SELECT 1 AS b LIMIT 0.1) AS z",
+                [],
+            ),
+        ]
+
+        with duckdb.connect() as connection:
+            connection.execute("CREATE TABLE x(a INT)")
+            connection.execute("INSERT INTO x VALUES (1)")
+            connection.execute("CREATE TABLE y(a INT)")
+            connection.execute("INSERT INTO y VALUES (1), (2)")
+
+            for name, sql, expected in cases:
+                expression = parse_one(sql, dialect="duckdb")
+                queries = {
+                    "original": expression,
+                    "eliminate_joins": optimizer.eliminate_joins.eliminate_joins(expression.copy()),
+                    "optimize": optimizer.optimize(
+                        expression.copy(), schema=schema, dialect="duckdb"
+                    ),
+                }
+
+                for mode, query in queries.items():
+                    with self.subTest(case=name, mode=mode):
+                        generated = query.sql(dialect="duckdb")
+                        if mode != "original" and name in (
+                            "scalar aggregate where false",
+                            "fromless literal",
+                            "fromless limit 2",
+                        ):
+                            self.assertIsNone(query.find(exp.Join), generated)
+                        self.assertEqual(
+                            sorted(connection.execute(generated).fetchall()),
+                            sorted(expected),
+                            generated,
+                        )
+
     def test_eliminate_ctes(self):
         self.check_file(
             "eliminate_ctes",

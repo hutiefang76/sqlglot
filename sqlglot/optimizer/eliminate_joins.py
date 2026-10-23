@@ -119,11 +119,42 @@ def _unique_outputs(scope: Scope) -> set[str]:
 
 
 def _has_single_output_row(scope: Scope) -> bool:
-    return isinstance(scope.expression, exp.Select) and (
-        all(isinstance(e.unalias(), exp.AggFunc) for e in scope.expression.selects)
-        or _is_limit_1(scope)
-        or not scope.expression.args.get("from_")
-    )
+    expression = scope.expression
+
+    if not isinstance(expression, exp.Select):
+        return False
+
+    if (
+        expression.args.get("group")
+        or expression.args.get("having")
+        or expression.args.get("qualify")
+        or expression.args.get("offset")
+    ):
+        return False
+
+    limit = expression.args.get("limit")
+    if limit is not None and not _is_limit_1(scope):
+        # A zero or unknown LIMIT can empty the result; only a positive integer literal above 1 is
+        # guaranteed not to change a single-row result.
+        limit_value = limit.expression
+        if not (
+            isinstance(limit_value, exp.Literal)
+            and limit_value.is_int
+            and int(limit_value.to_py()) > 1
+        ):
+            return False
+
+    if all(
+        isinstance(select_expression.unalias(), exp.AggFunc)
+        for select_expression in expression.selects
+    ):
+        return True
+
+    # A WHERE clause can empty a FROM-less query, but it only filters the input of an aggregate.
+    if not expression.args.get("from_") and not expression.args.get("where"):
+        return True
+
+    return _is_limit_1(scope)
 
 
 def _is_limit_1(scope: Scope) -> bool:
