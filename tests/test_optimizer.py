@@ -2011,6 +2011,12 @@ SELECT :with_,WITH :expressions,CTE :this,UNION :this,SELECT :expressions,1,:exp
             pretty=True,
         )
 
+    def test_eliminate_joins_limit_1_is_not_exactly_one_row(self):
+        sql = "SELECT x.a FROM x CROSS JOIN (SELECT y.b AS b FROM y WHERE y.b > 100 LIMIT 1) AS y"
+        optimized = optimizer.optimize(parse_one(sql), schema=self.schema, dialect="duckdb")
+        self.assertCountEqual(self.conn.execute(sql).fetchall(), [])
+        self.assertCountEqual(self.conn.execute(optimized.sql("duckdb")).fetchall(), [])
+
     def test_eliminate_ctes(self):
         self.check_file(
             "eliminate_ctes",

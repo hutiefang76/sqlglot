@@ -271,7 +271,8 @@ SELECT
   x.a
 FROM x;
 
-# title: Cross join on derived table with LIMIT 1
+# title: Noop - LIMIT 1 doesn't guarantee a row, so the cross join isn't redundant
+# execute: true
 SELECT
   x.a
 FROM x
@@ -279,11 +280,31 @@ CROSS JOIN (
   SELECT
     y.b AS b
   FROM y
+  WHERE
+    y.b > 100
   LIMIT 1
 ) AS y;
 SELECT
   x.a
-FROM x;
+FROM x
+CROSS JOIN (
+  SELECT
+    y.b AS b
+  FROM y
+  WHERE
+    y.b > 100
+  LIMIT 1
+) AS y;
+
+
+# title: Left join on derived table with LIMIT 1
+# execute: true
+SELECT x.a FROM x LEFT JOIN (SELECT y.b FROM y LIMIT 1) AS y ON x.a = y.b ORDER BY x.a;
+SELECT
+  x.a
+FROM x
+ORDER BY
+  x.a;
 
 # title: Cross join on derived table with no FROM clause
 SELECT

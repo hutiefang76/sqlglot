@@ -60,7 +60,7 @@ def _should_eliminate_join(scope: Scope, join: exp.Join, alias: str) -> bool:
         and not _join_is_used(scope, join, alias)
         and (
             (join.side == "LEFT" and _is_joined_on_all_unique_outputs(inner_source, join))
-            or (not join.args.get("on") and _has_single_output_row(inner_source))
+            or (not join.args.get("on") and _has_exactly_one_row(inner_source))
         )
     )
 
@@ -112,21 +112,29 @@ def _unique_outputs(scope: Scope) -> set[str]:
         else:
             return set()
 
-    if _has_single_output_row(scope):
+    if _has_at_most_one_row(scope):
         return set(expr.named_selects)
 
     return set()
 
 
-def _has_single_output_row(scope: Scope) -> bool:
+def _has_at_most_one_row(scope: Scope) -> bool:
+    """Determine whether `scope` can't produce more than one row"""
+    return _has_exactly_one_row(scope) or _is_limit_1(scope)
+
+
+def _has_exactly_one_row(scope: Scope) -> bool:
+    """Determine whether `scope` must produce exactly one row"""
     return isinstance(scope.expression, exp.Select) and (
         all(isinstance(e.unalias(), exp.AggFunc) for e in scope.expression.selects)
-        or _is_limit_1(scope)
         or not scope.expression.args.get("from_")
     )
 
 
 def _is_limit_1(scope: Scope) -> bool:
+    if not isinstance(scope.expression, exp.Select):
+        return False
+
     limit: exp.Limit | None = scope.expression.args.get("limit")
     return limit is not None and limit.expression.this == "1"
 
