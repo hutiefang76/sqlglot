@@ -2011,6 +2011,65 @@ SELECT :with_,WITH :expressions,CTE :this,UNION :this,SELECT :expressions,1,:exp
             pretty=True,
         )
 
+    def test_eliminate_joins_distinct_on(self):
+        schema = {"a": {"k": "INT"}, "b": {"k": "INT", "v": "INT"}}
+
+        def full_optimize(expression):
+            return optimizer.optimize(expression, schema=schema, dialect="duckdb")
+
+        def run_modes(sql):
+            with duckdb.connect() as con:
+                con.execute("CREATE TABLE a (k INT)")
+                con.execute("INSERT INTO a VALUES (10)")
+                con.execute("CREATE TABLE b (k INT, v INT)")
+                con.execute("INSERT INTO b VALUES (10, 1), (10, 2), (10, 3)")
+
+                modes = {}
+                for name, transform in (
+                    ("original", lambda e: e),
+                    ("optimize", full_optimize),
+                    ("eliminate_joins", optimizer.eliminate_joins.eliminate_joins),
+                ):
+                    generated = transform(parse_one(sql, read="duckdb")).sql("duckdb")
+                    modes[name] = (generated, con.sql(generated).fetchall())
+
+                return modes
+
+        # DISTINCT ON (b.v) deduplicates b.v only, so the projected b.k is not unique
+        wrong_key = "SELECT a.k FROM a LEFT JOIN (SELECT DISTINCT ON (b.v) b.k FROM b) AS sub ON a.k = sub.k"
+        for mode, (optimized, rows) in run_modes(wrong_key).items():
+            with self.subTest(case="distinct_on_wrong_key", mode=mode, sql=optimized):
+                self.assertEqual(rows, [(10,), (10,), (10,)])
+
+        # Control: plain DISTINCT makes the projected key unique, so safe elimination stays on
+        plain_distinct = (
+            "SELECT a.k FROM a LEFT JOIN (SELECT DISTINCT b.k FROM b) AS sub ON a.k = sub.k"
+        )
+        plain_modes = run_modes(plain_distinct)
+        for mode, (optimized, rows) in plain_modes.items():
+            with self.subTest(case="plain_distinct", mode=mode, sql=optimized):
+                self.assertEqual(rows, [(10,)])
+        self.assertFalse(parse_one(plain_modes["optimize"][0], read="duckdb").find(exp.Join))
+        self.assertFalse(parse_one(plain_modes["eliminate_joins"][0], read="duckdb").find(exp.Join))
+
+        # Control: DISTINCT ON the join key is equivalent, but elimination is not required
+        distinct_on_key = "SELECT a.k FROM a LEFT JOIN (SELECT DISTINCT ON (b.k) b.k FROM b) AS sub ON a.k = sub.k"
+        for mode, (optimized, rows) in run_modes(distinct_on_key).items():
+            with self.subTest(case="distinct_on_join_key", mode=mode, sql=optimized):
+                self.assertEqual(rows, [(10,)])
+
+        # UNION (DISTINCT) deduplicates its branches, so the projected key is unique
+        union_distinct = "SELECT a.k FROM a LEFT JOIN (SELECT b.k FROM b WHERE b.v = 1 UNION SELECT b.k FROM b WHERE b.v = 2) AS sub ON a.k = sub.k"
+        for mode, (optimized, rows) in run_modes(union_distinct).items():
+            with self.subTest(case="union_distinct", mode=mode, sql=optimized):
+                self.assertEqual(rows, [(10,)])
+
+        # UNION ALL input is limited to a single row, so the join yields one row
+        union_all = "SELECT a.k FROM a LEFT JOIN (SELECT b.k FROM b WHERE b.v = 1 UNION ALL SELECT b.k FROM b WHERE b.v < 0) AS sub ON a.k = sub.k"
+        for mode, (optimized, rows) in run_modes(union_all).items():
+            with self.subTest(case="union_all_limited_input", mode=mode, sql=optimized):
+                self.assertEqual(rows, [(10,)])
+
     def test_eliminate_ctes(self):
         self.check_file(
             "eliminate_ctes",

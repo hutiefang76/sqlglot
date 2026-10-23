@@ -64,6 +64,26 @@ LEFT JOIN (
 ) AS y
   ON x.b = y.b;
 
+# title: Noop - distinct on a column that is not the projected join key
+SELECT
+  x.a
+FROM x
+LEFT JOIN (
+  SELECT DISTINCT ON (y.c)
+    y.b
+  FROM y
+) AS y
+  ON x.b = y.b;
+SELECT
+  x.a
+FROM x
+LEFT JOIN (
+  SELECT DISTINCT ON (y.c)
+    y.b
+  FROM y
+) AS y
+  ON x.b = y.b;
+
 # title: Noop - not all grouped columns in condition
 SELECT
   x.a
